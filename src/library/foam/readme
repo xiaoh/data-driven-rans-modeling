@@ -1,0 +1,10 @@
+getHostCellIdx: give spatial coordinate to find cell index
+getObsMatrix: get observation matrix (H matrix) for EnKF
+markerFOam: generate mean flow features from raw RANS flow variables.
+steadyTauFoam: forward solver from Reynolds stress to mean velocities
+streadPreTauFoam: generate baseline Reynolds stress for DA
+turbulenceModel: user modified RANS models for DA
+continuumAdjointTauFoam: continuum adjoint solver
+discreteAdjointTauFoam: discrete adjoint solver
+
+

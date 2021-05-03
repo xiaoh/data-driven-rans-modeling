@@ -1,0 +1,51 @@
+caseName	        pehill_base
+caseSolver          steadyTauFoam
+pseudoObs           0
+Ncell		        3000
+NcellObs            36
+capBaseline         True
+TauOnFlag           False
+
+lenConstFlag        True
+# len (xx, xx, xx) are length scale for x-, y-, and z- direction
+lenVecXi            1, 1, 1
+lenVecEta           1, 1, 1
+lenVecK             1, 1, 1
+lenVecV             1, 1, 1
+
+# sigmaConstFlag = True means stationary sigma will be used
+sigmaConstFlag      True
+# sigmaVec (xx, xx, xx, xx) are sigma for Xi, Eta, logK, V
+sigmaVec            0.3, 0.7, 0.6, 0.1
+
+# number of modes
+Nmode               10
+# kernel Type 
+kernelType          SqExp
+
+# parameters to construct nonstationary hyperparameters
+rbfLengthScale      1
+rbfKernel           linear
+
+# klCalculate if True, we will re-calculate the KL modes
+klCalculate         False
+# determine which variable will be perturbed 
+perturbXi           True
+perturbEta          True
+perturbK            True
+perturbVA           True
+perturbVB           True
+perturbVC           True
+
+# parameters for observation
+ObserveMean         0
+ObsSigmaFixedVec    1e-3, 1e-3, 1e-3, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5
+ObsRelCoeffVec      1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1
+ObsRmaCoeff         1
+ObsErrCoeff         0
+
+# parameters for parallel computing
+enablePP            True
+cpuToUse            20
+
+OutputControlDict  ./OutputControlDict.in

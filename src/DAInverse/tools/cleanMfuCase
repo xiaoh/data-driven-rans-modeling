@@ -1,0 +1,12 @@
+#!/bin/bash
+# Time-stamp: <2015-07-07 Jianxun Wang>
+# usage: cpcasefoam src dest
+
+rm *_base-* -rf
+rm *.txt    -rf
+rm -rf tauUpdate 
+rm -rf log*
+rm -rf *temp
+rm -rf *pdf
+rm -rf *eps
+find ./debugData/ -type f -delete

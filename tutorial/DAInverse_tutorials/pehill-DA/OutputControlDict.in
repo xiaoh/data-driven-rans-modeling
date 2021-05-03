@@ -1,0 +1,5 @@
+screenOutput True
+figureOutput False
+txtfileOutput True
+verboseLevel  2
+

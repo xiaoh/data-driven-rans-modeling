@@ -1,0 +1,11 @@
+forwardModel FoamTauSolver
+Tend 9000
+DAInterval 3000
+Ns 10
+sensitivityOnly False
+reachmaxiteration False
+forwardModelInput ./forwardModelInput.in
+OutputControlDict ./OutputControlDict.in
+convergenceResi 1e-3
+iDebug False
+debugFolderName ./debugData/

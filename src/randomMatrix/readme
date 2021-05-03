@@ -1,0 +1,6 @@
+mainDriver.py: main driver
+    MaxEnSolver.py
+        RMFields.py: generate random matrix fields
+             GammaFields.py: generate Gamma RF for diagonal terms   
+             GuassianFields: generate Gaussian RF for off-diagonal terms
+pce_matlab: PCE solver for generate Gamma variables from Gaussian variables

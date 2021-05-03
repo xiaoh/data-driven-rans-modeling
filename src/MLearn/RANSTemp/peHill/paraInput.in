@@ -1,0 +1,7 @@
+# User specifying parameters for RANS cases
+mesh                        cell14751
+turbulence_model            LaunderSharmaKE
+templateCaseName            template
+openFoamSolver              simpleFoam
+FinalTimeStep               10000
+ReVec                       1400, 2800, 5600, 10595

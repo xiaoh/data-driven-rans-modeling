@@ -1,0 +1,12 @@
+mfuMain.py: main driver
+	DAFiltering.py - Data assimilation classes
+		- FoamTauSolver.py: class for Reynolds stress inversion 
+			-ReynoldsStressRF.py: decompose Reynolds stress discrepancy.
+			-foamFileOperation.py: interface with openFOAM
+			-sigmaFieldOperations.py: generate prior variance field
+			-deltaTauRandomField.py: express deltaTau with KL expansion
+		- FoamVegetationSolver.py: class for vegetation inversion
+
+		- utilities: tools
+		
+		- KLReducedModel.py: use UQTK to do KLexpansion (replace deltaTauRandomField.py for verification)

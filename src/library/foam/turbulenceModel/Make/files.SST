@@ -1,0 +1,2 @@
+mykOmegaSST/mykOmegaSST.C
+LIB = $(FOAM_USER_LIBBIN)/libmyIncompresssibleRASModels

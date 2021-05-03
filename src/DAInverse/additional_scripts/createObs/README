@@ -1,0 +1,10 @@
+
+
+Use the data from 'sets/X/x*.0_U2.xy.raw' to create 'obsdata.txt'.
+Run 'createObs.py' to create 'obsLocations', 'obsVelocity', and 'obsVPlot'.
+Place 'obsLocations' in 'pehill_base/constant/', and place 'obsVelocity' and 'obsVPlot' in 'pehill_base/observationData/'.
+Write the new number of observations in 'forwardModelInput.in' input 'NcellObs'.
+
+Run '>> getObsMatrix'. This creates 'constant/index.H' and 'constant/weightH.txt'.
+
+

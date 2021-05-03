@@ -1,0 +1,26 @@
+synFlag             False
+plotAll             False
+plotPtBary          True
+plotLineBary        True
+onePtCoord          4, 0.5, 0.05
+EnKFStep            17
+finalEnKFStep       17
+legendFlag          True
+
+XiEtaFlag           True
+KFlag               True
+VFlag               True
+deltaXiEtaFlag      False   
+deltaTKEFlag        False
+deltaVFlag          False
+
+doSampling          True
+timeDir             45000
+lastTimeDir         54000
+
+plotUx      True
+plotUy      False
+plotTau     True
+plotDeltaTau    False
+UorgFlag   False
+caseName   c3

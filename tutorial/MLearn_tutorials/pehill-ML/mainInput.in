@@ -1,0 +1,24 @@
+# specifying cases
+testFlow                    peHill
+testFlowRe                  5600
+testFlownMesh               14751
+trainFlows                  peHill, peHill
+trainFlowsRes               5600, 10595
+trainFlowsnMeshs            14751, 14751
+turbulence_model            LaunderSharmaKE
+# specifying parameters for input feature space
+combinationKeyword_feature  Scalar
+reGenerateFeatureFile       False
+reGenerateDataFile          True
+# specifying parameters for genering training data
+#deltaOrienParamerization    Quaternion
+deltaOrienParamerization    Euler
+# note, for dataSparsenessList and dataSourceList, the last one is the test flow
+dataSparsenessList          fullField, fullField, fullField
+dataSourceList              BreuerDNS, BreuerLES, BreuerDNS
+# regression model
+# randomForest, neuralNetwork, linear
+regressionModel             randomForest
+# responseCombinationFlag: separateLearning, combineLearning
+responseCombinationFlag     separateLearning
+

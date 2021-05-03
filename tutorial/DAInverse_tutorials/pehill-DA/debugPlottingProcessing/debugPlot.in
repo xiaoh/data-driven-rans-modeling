@@ -1,0 +1,9 @@
+debugDir            ../debugData/
+finalDAStep         1.0
+obsSigmaFixed       5e-3, 5e-3, 5e-3
+obsRelCoeff         1e-1, 1e-1, 1e-1
+obsRmaCoeff         1.0
+XCVec               0, 8, 16
+n_iU                3
+n_iV                3
+n_jomega            3

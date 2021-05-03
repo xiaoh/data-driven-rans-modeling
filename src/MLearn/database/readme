@@ -1,0 +1,9 @@
+This is database for processed highfidelity data (OpenFOAM files format, which are interpolated to RANS mesh)
+
+    Please Rename it as:
+
+    FlowName/fullField/Field_FlowName-ReXX-Source-meshName
+    
+    or
+    
+    FlowName/CoarseData/Field_FlowName-ReXX-Source-meshName/files

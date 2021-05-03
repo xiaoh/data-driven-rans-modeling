@@ -1,0 +1,5 @@
+adjointOutletPressure/adjointOutletPressureFvPatchScalarField.C
+adjointOutletVelocity/adjointOutletVelocityFvPatchVectorField.C
+adjointTauFoam.C
+
+EXE = $(FOAM_USER_APPBIN)/continuumAdjointTauFoam

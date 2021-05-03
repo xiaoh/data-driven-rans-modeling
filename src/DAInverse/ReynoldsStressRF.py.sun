@@ -1,0 +1,764 @@
+import numpy as np
+import numpy
+import matplotlib.pylab as plt
+import os.path as osp
+from foamFileOperation import *
+
+class ReynoldsStressRF:
+
+    """
+    A class representing Reynolds stress as random fields.
+
+    Note: Symmetric tensor fields \\tau_{ij} are represented as numpy array of
+    dimension N x 6. since numpy stores data in row major order.
+
+    1. Individual instances of perturbed Reynolds stresses are not stored as
+    data member.  Instead, their values are written to OpenFOAM file and
+    their workspace cleaned.
+
+    Data Members:
+
+        casePath: path of OpenFOAM case associated with tauOrg (string)
+        tauFile: name of the file of Reynolds stress (string)
+        N: # of cells in field (consistent to OpenFOAM cell ordering)
+        m: # of of samples (perturbed instances)
+        deltaXi: normalized perturbation/error coordinates,
+                 horizontal. (N x m), in [-1, 1]
+        deltaEta: normalized perturbation/error coordinates,
+                 vertical. (N x m), in [-1, 1]
+        xcs: coordinates of the triangle (1 x 3)
+        tauOrg: original Reynolds stress field (N x 6)
+        kOrg: TKE field obtained from eigendecomposition of tauOrg (N x 1)
+        v1Org, v2Org, v3Org: eigenvectors of tauOrg (N x 3)
+        COrg: Baycentric coordinates associated with tauOrg
+        NPOrg: If if the matrix is right-handed (1) or left-handed (-1)
+    """
+
+    def __init__(self,casePath, tauFile, nMesh, nSample, correctInitTau = 'False'):
+
+        """
+            __init__(): constructor.
+
+            Construct by reading from file or input argument. Also accept
+            argument about kernel function of deltaXi and deltaEta
+            (e.g., SqExp, which is Gaussian)
+        """
+
+
+        self.casePath = casePath        # path where tau is
+        self.tauFile = tauFile          # name of tau file
+
+        if correctInitTau == 'False':
+            self.correctInitTau = False
+        else:
+            self.correctInitTau = True
+        
+        #TODO: the path here may cause some problem
+        if casePath == 'None':
+            self.tau = tauFile
+        else:
+            self.tau = readTurbStressFromFile(casePath+tauFile)
+
+        self.nMesh = self.tau.shape[0]  # number of cells
+
+        self.nSample = nSample          # number of samples 
+        self.deltaXi = np.zeros((self.nMesh,self.nSample))
+        self.deltaEta = np.zeros((self.nMesh,self.nSample))
+        self.xcs = np.array([[1,0],[0,0],[0.5,(3**0.5/2.0)]])
+        self.triangle = np.array([[0,0],[1,0],
+                                  [0.5,3**0.5/2.0],[0.5,3**0.5/2.0]])
+
+        self.C = np.zeros((self.nMesh,3))
+        self.V1 = np.zeros((self.nMesh,3))
+        self.V2 = np.zeros((self.nMesh,3))
+        self.V3 = np.zeros((self.nMesh,3))
+        self.k = np.zeros((self.nMesh,1))
+        self.NP = np.zeros((self.nMesh,1))
+
+        self.COrg = np.zeros((self.nMesh,3))
+        self.V1Org = np.zeros((self.nMesh,3))
+        self.V2Org = np.zeros((self.nMesh,3))
+        self.V3Org = np.zeros((self.nMesh,3))
+        self.kOrg = np.zeros((self.nMesh,1))
+        self.NPOrg = np.zeros((self.nMesh,1))
+
+        self.kOrg,self.V1Org,self.V2Org,self.V3Org,self.COrg,self.NPOrg = \
+            self._tau2PhysParams(self.tau)
+
+
+        self.k,self.V1,self.V2,self.V3,self.C,self.NP = self._tau2PhysParams(self.tau)
+
+        self.tauOrg = self.tau
+        self.tau = self._C2Tau(self.C)
+
+    def perturbTau(self,deltaXi,deltaEta,*deltaKT):
+
+        """
+        Perturb Reynolds stresses according to deltaXi, deltaEta, and deltaLog2K
+        Write them to OpenFOAM instances.  First call _perturbXiEta() to
+        perturb on \\xi, \eta plane, and map to Reynolds stresses
+
+        deltaXi and deltaEta are based on the absolute value in the natural
+        domain
+        if deltaLog2K is activated, k will be treated as k*(2**deltaLog2K)
+        where deltaLog2K = log2(K.new/K.old)
+        """
+        X = self._C2X(self.COrg)
+        self.modifyError(deltaXi,deltaEta)
+        RSs = self._phys2Natural(X)
+        XNew = self._natural2Phys(RSs)
+        self.C = self._X2C(XNew)
+        if len(deltaKT) == 2:
+            tau = self._C2Tau(self.C,deltaKT[1])
+        else:
+            tau = self._C2Tau(self.C)
+
+        if len(deltaKT) > 0:
+            tau = tau*numpy.exp2(deltaKT[0])
+        return tau
+
+    def perturbTauInBary(self,deltaXbary,deltaYbary,*deltaKT):
+
+        """
+        Perturb Reynolds stresses according to deltaXi, deltaEta, and deltaLog2K
+        Write them to OpenFOAM instances.  First call _perturbXiEta() to
+        perturb on \\xi, \eta plane, and map to Reynolds stresses
+
+        deltaXi and deltaEta are based on the absolute value in the natural
+        domain
+        if deltaLog2K is activated, k will be treated as k*(2**deltaLog2K)
+        where deltaLog2K = log2(K.new/K.old)
+        """
+        X = self._C2X(self.COrg)
+        XNew = X
+        XNew[:,0] = X[:,0] + deltaXbary
+        XNew[:,1] = X[:,1] + deltaYbary
+        self.C = self._X2C(XNew)
+        if len(deltaKT) == 2:
+            tau = self._C2Tau(self.C,deltaKT[1])
+        else:
+            tau = self._C2Tau(self.C)
+
+        if len(deltaKT) > 0:
+            tau = tau*numpy.exp2(deltaKT[0])
+        return tau
+
+
+    def getXiFactor(self):
+        """
+        Get the shrink factor of Xi from Xi-Eta plane to the Barycentric Triangle.
+
+        This shrink factor is always smaller or equals to 1, as long as the point is within
+        Barycentric Triangle.
+        """
+        k, V1, V2, V3, C, NP = self._tau2PhysParams(self.tau)
+        X = self._C2X(C)
+        factor = (self.xcs[2,1] - X[:,1]) / self.xcs[2,1]
+        return factor
+
+    def getDeltaXiEtaLog2K(self,tauOld,tauNew):
+
+        """
+        Get deltaXi deltaEta from two Tau fields
+
+        where deltaLog2K = log2(K.new/K.old)
+        """
+
+        kOld,V1Old,V2Old,V3Old,COld,NPOld = self._tau2PhysParams(tauOld)
+        kNew,V1New,V2New,V3New,CNew,NPNew = self._tau2PhysParams(tauNew)
+
+        XOld = self._C2X(COld)
+        XNew = self._C2X(CNew)
+
+        RSOld = self._phys2Natural(XOld)
+        RSNew = self._phys2Natural(XNew)
+
+        Xi = np.zeros((self.nMesh,1))
+        Eta = np.zeros((self.nMesh,1))
+        deltaLog2K = np.zeros((self.nMesh,1))
+
+        tiny = np.finfo(np.float).tiny
+
+        for i in range(self.nMesh):
+            deltaXi = RSNew[i,0]-RSOld[i,0]
+            signXi = abs(deltaXi)/(deltaXi + tiny)
+            deltaEta = RSNew[i,1]-RSOld[i,1]
+            signEta = abs(deltaEta)/(deltaEta + tiny)
+            dK = np.log2(kNew[i]/(kOld[i] + tiny))
+
+            # relative xi and eta
+            # Xi[i] = signXi*deltaXi/(1.0*signXi - RSOld[i,0] + tiny);
+            # Eta[i] = signEta*deltaEta/(1.0*signEta - RSOld[i,1] + tiny);
+
+            # absolute xi and eta
+            Xi[i] = deltaXi
+            Eta[i] = deltaEta
+            deltaLog2K[i] = dK
+
+        return Xi, Eta, deltaLog2K
+
+    def getDeltaXYbaryLog2K(self,tauOld,tauNew):
+
+        """
+        Get deltaXbary deltaYbary from two Tau fields
+
+        where deltaLog2K = log2(K.new/K.old)
+        """
+
+        kOld,V1Old,V2Old,V3Old,COld,NPOld = self._tau2PhysParams(tauOld)
+        kNew,V1New,V2New,V3New,CNew,NPNew = self._tau2PhysParams(tauNew)
+
+        XOld = self._C2X(COld)
+        XNew = self._C2X(CNew)
+
+        RSOld = self._phys2Natural(XOld)
+        RSNew = self._phys2Natural(XNew)
+
+        Xbary = np.zeros((self.nMesh,1))
+        Ybary = np.zeros((self.nMesh,1))
+        deltaLog2K = np.zeros((self.nMesh,1))
+
+        tiny = np.finfo(np.float).tiny
+
+        for i in range(self.nMesh):
+            deltaXbary = XNew[i,0]-XOld[i,0]
+            deltaYbary = XNew[i,1]-XOld[i,1]
+            dK = np.log2(kNew[i]/(kOld[i] + tiny))
+
+            # absolute xi and eta
+            Xbary[i] = deltaXbary
+            Ybary[i] = deltaYbary
+            deltaLog2K[i] = dK
+
+        return Xbary, Ybary, deltaLog2K
+
+    def getXYinBary(self,tauOld):
+
+        """
+        Get deltaXi deltaEta from two Tau fields
+
+        where deltaLog2K = log2(K.new/K.old)
+        """
+
+        kOld,V1Old,V2Old,V3Old,COld,NPOld = self._tau2PhysParams(tauOld)
+
+        XOld = self._C2X(COld)
+
+        Xbary = np.zeros((self.nMesh,1))
+        Ybary = np.zeros((self.nMesh,1))
+
+        for i in range(self.nMesh):
+            Xbary[i] = XOld[i,0]
+            Ybary[i] = XOld[i,1]
+        return Xbary, Ybary
+
+
+
+    def getDeltaThetaVABC(self,tauOld,tauNew):
+
+        """
+        Get deltaThetaVA deltaThetaVB deltaThetaVC from two Tau fields
+        The theory is according to the defination of Eulerian Angles
+
+        """
+
+        ThetaVAOld, ThetaVBOld, ThetaVCOld = self.getThetaVABC(tauOld)
+        ThetaVANew, ThetaVBNew, ThetaVCNew = self.getThetaVABC(tauNew)
+
+        ThetaVA = np.zeros((self.nMesh,1))
+        ThetaVB = np.zeros((self.nMesh,1))
+        ThetaVC = np.zeros((self.nMesh,1))
+
+        for i in range(self.nMesh):
+
+            angleA = ThetaVANew[i] - ThetaVAOld[i]
+            angleB = ThetaVBNew[i] - ThetaVBOld[i]
+            angleC = ThetaVCNew[i] - ThetaVCOld[i]
+
+            ThetaVA[i] = self._adjustThetaAngle2(angleA)
+            ThetaVB[i] = self._adjustThetaAngle2(angleB)
+            ThetaVC[i] = self._adjustThetaAngle2(angleC)
+
+        return ThetaVA, ThetaVB, ThetaVC
+
+    def getThetaVABC(self,tau):
+
+        k,V1,V2,V3,C,NP = self._tau2PhysParams(tau)
+
+        ThetaVAList = np.zeros((self.nMesh,1))
+        ThetaVBList = np.zeros((self.nMesh,1))
+        ThetaVCList = np.zeros((self.nMesh,1))
+
+        for i in range(self.nMesh):
+
+            # The rotation matrix for each basis is themself
+            VMatrix = np.array([V1[i],V2[i],V3[i]])
+
+            ThetaVB = np.arccos(VMatrix[2,2])
+            if ThetaVB == 0:
+                aAndC = np.arctan2(VMatrix[0,1],VMatrix[0,0])
+                if aAndC < 0:
+                    aAndC = aAndC + 2*np.pi
+
+                ThetaVA = 0.5*aAndC
+                ThetaVC = 0.5*aAndC
+            else:
+                ThetaVA = np.arctan2(VMatrix[2,0]/np.sin(ThetaVB),-VMatrix[2,1]/np.sin(ThetaVB))
+                ThetaVC = np.arctan2(VMatrix[0,2]/np.sin(ThetaVB), VMatrix[1,2]/np.sin(ThetaVB))
+
+            ThetaVAList[i] = ThetaVA
+            ThetaVBList[i] = ThetaVB
+            ThetaVCList[i] = ThetaVC
+
+        return ThetaVAList, ThetaVBList, ThetaVCList
+
+    def plotTauOnBaycentric(self,tau, tauComp = 'None', tauPerturb = 'None', sampleLS = 'o-'):
+        """
+        Plot a Reynolds stress (the i^th error realization) on Baycentric
+        coordinate
+        """
+
+        if tauComp == 'None':
+            k,V1,V2,V3,C,NP = self._tau2PhysParams(tau)
+            X = self._C2X(C)
+            plt.clf()
+            plt.plot(X[:,0],X[:,1],'ko')
+            plt.plot([0,1,0.5,0.5,0],[0,0,3**0.5/2.0,3**0.5/2.0,0],'b-')
+            plt.show()
+        else:
+            k,V1,V2,V3,C,NP = self._tau2PhysParams(tauPerturb)
+            X = self._C2X(C)
+            p3, = plt.plot(X[:,0],X[:,1], sampleLS, markeredgecolor='grey', markerfacecolor='None', alpha = 0.5)
+            plt.plot(X[0,0],X[0,1],'bo', markeredgecolor='b', markerfacecolor='None', alpha = 0.5)
+            plt.plot(X[-1,0],X[-1,1],'bo', alpha = 0.5)
+
+            k,V1,V2,V3,C,NP = self._tau2PhysParams(tau)
+            X = self._C2X(C)
+
+            p1, = plt.plot(X[:,0],X[:,1],'rs', markeredgecolor='r', markerfacecolor='None')
+            plt.plot(X[0,0],X[0,1],'bs', markeredgecolor='b', markerfacecolor='None')
+            plt.plot(X[-1,0],X[-1,1],'bs')
+
+            k,V1,V2,V3,C,NP = self._tau2PhysParams(tauComp)
+            X = self._C2X(C)
+            p2, = plt.plot(X[:,0],X[:,1],'k^', markeredgecolor='k', markerfacecolor='None')
+            plt.plot(X[1,0],X[1,1],'b^', markeredgecolor='b', markerfacecolor='None')
+            plt.plot(X[-1,0],X[-1,1],'b^')
+
+            plt.plot([0,1,0.5,0.5,0],[0,0,3**0.5/2.0,3**0.5/2.0,0],'b-')
+	return p1, p2, p3
+
+    def plotXPerturb(self,deltaXi,deltaEta,fileName):
+
+        X = self._C2X(self.COrg)
+        plt.clf()
+        plt.plot(X[:,0],X[:,1],'ko')
+        plt.plot([0,1,0.5,0.5,0],[0,0,3**0.5/2.0,3**0.5/2.0,0],'b-')
+
+        self.perturbTau(deltaXi,deltaEta)
+
+        XNew = self._C2X(self.C)
+
+        plt.plot(XNew[:,0],XNew[:,1],'r+')
+
+        plt.savefig(fileName)
+
+    def plotRSPerturb(self,deltaXi,deltaEta,fileName):
+
+        X = self._C2X(self.COrg)
+        plt.clf()
+
+        # Draw the points in RS coordinate before "perturb"
+        RS = self._phys2Natural(X)
+        plt.plot(RS[:,0],RS[:,1],'ko')
+        plt.plot([-1,1,1,-1,-1],[-1,-1,1,1,-1],'b-')
+
+        self.perturbTau(deltaXi,deltaEta)
+
+        # Draw the points in RS coordinate after "perturb"
+        XNew = self._C2X(self.C)
+        RSNew = self._phys2Natural(XNew)
+        plt.plot(RSNew[:,0],RSNew[:,1],'r+')
+
+        plt.savefig(fileName)
+
+    def plotSquare(self):
+        plt.plot([-1,1,1,-1,-1],[-1,-1,1,1,-1],'b-')
+
+    def plotOnRS(self, tau, cl, alpha):
+        k, V1, V2, V3, C, NP = self._tau2PhysParams(tau)
+        X = self._C2X(C)
+        RS = self._phys2Natural(X)
+        p, = plt.plot(RS[0,0],RS[0,1],'o', color = cl, alpha = alpha)
+        return p, RS[0,0], RS[0,1]
+
+    def plotTriangle(self):
+        plt.plot([0,1,0.5,0.5,0],[0,0,3**0.5/2.0,3**0.5/2.0,0],'b-')
+
+    def plotOnTriangle(self,tau,cl,alpha):
+        """
+        Plot a Reynolds stress (the i^th error realization) on Baycentric
+        coordinate
+        """
+        k,V1,V2,V3,C,NP = self._tau2PhysParams(tau)
+        X = self._C2X(C)
+ 
+        p, = plt.plot(X[0,0],X[0,1], 'o', color = cl, alpha = alpha)
+        return p, X[0,0], X[0,1]
+
+    def modifyError(self,deltaXi,deltaEta):
+        """
+        == Mutation functions ==
+
+        modifyError():
+
+        *   Modify deltaXi and deltaEta from given values (either specified or
+        obtained from KL summation)
+        """
+        self.deltaXi = deltaXi
+        self.deltaEta = deltaEta
+    
+    ##############################  Priviate  #################################
+    def _tau2PhysParams(self,tauArray):
+        """
+        Convert tau to physical parameters (k, C1, C2, C3, v1, v2, v3)
+        """
+        self.nMesh = tauArray.shape[0]
+        ks = np.zeros((self.nMesh,1))
+        Cs = np.zeros((self.nMesh,3))
+        NPs = np.zeros((self.nMesh,1))
+        V1s = np.zeros((self.nMesh,3))
+        V2s = np.zeros((self.nMesh,3))
+        V3s = np.zeros((self.nMesh,3))
+
+        for i in range(self.nMesh):
+            tau = np.zeros((3,3))
+            tauData = tauArray[i,:]
+
+            tau[0,0] = tauData[0]
+            tau[0,1] = tauData[1]
+            tau[0,2] = tauData[2]
+            tau[1,1] = tauData[3]
+            tau[1,2] = tauData[4]
+            tau[2,2] = tauData[5]
+
+            tau[1,0] = tau[0,1]
+            tau[2,0] = tau[0,2]
+            tau[2,1] = tau[1,2]
+
+            tiny = np.finfo(np.float).tiny
+            # find the k, aij, and the eigenvalue
+            k = np.trace(tau)/2.0
+            aij = tau/2.0/(k + tiny) - (np.eye(3) + tiny)/3.0
+            w,v = np.linalg.eig(aij)
+            max,min = w.argmax(),w.argmin()
+            mid = 3 - max - min
+            w[0],w[1],w[2] = w[min],w[mid],w[max]
+
+            vContainer = np.zeros((3,3))
+            vContainer[:,0],vContainer[:,1],vContainer[:,2] =\
+                v[:,min],v[:,mid],v[:,max]
+
+            ks[i,0] = k
+
+            vContainer = np.transpose(vContainer)
+
+            detV = np.linalg.det(vContainer)
+            NPs[i,0] = 1
+            if detV < 0:
+                vContainer = np.dot(np.array([[-1,0,0],[0,1,0],[0,0,1]]),vContainer)
+                NPs[i,0] = -1
+
+            ThetaVB = np.arccos(vContainer[2,2])
+            if ThetaVB == 0:
+                print "WARNING: ThetaVB == 0"
+                aAndC = np.arctan2(vContainer[0,1],vContainer[0,0])
+                if aAndC < 0:
+                    aAndC = aAndC + 2*np.pi
+
+                ThetaVA = 0.5*aAndC
+                ThetaVC = 0.5*aAndC
+            else:
+                ThetaVA = np.arctan2(vContainer[2,0]/np.sin(ThetaVB),-vContainer[2,1]/np.sin(ThetaVB))
+                ThetaVC = np.arctan2(vContainer[0,2]/np.sin(ThetaVB), vContainer[1,2]/np.sin(ThetaVB))
+
+            signA = np.sin(ThetaVA)/np.abs(np.sin(ThetaVA))
+            signC = np.sin(ThetaVC)/np.abs(np.sin(ThetaVC))
+
+            if signA < 0:
+                vContainer = np.dot(np.array([[-1,0,0],[0,1,0],[0,0,-1]]),vContainer)
+
+                ThetaVB2 = np.arccos(vContainer[2,2])
+                ThetaVC2 = np.arctan2(vContainer[0,2]/np.sin(ThetaVB2), vContainer[1,2]/np.sin(ThetaVB2))
+                signC = np.sin(ThetaVC2)/np.abs(np.sin(ThetaVC2))
+
+            if signC < 0:
+                vContainer = np.dot(np.array([[-1,0,0],[0,-1,0],[0,0,1]]),vContainer)
+
+            # ThetaVB2 = np.arccos(vContainer[2,2])
+            # ThetaVA2 = np.arctan2(vContainer[2,0]/np.sin(ThetaVB2),-vContainer[2,1]/np.sin(ThetaVB2))
+            # ThetaVC2 = np.arctan2(vContainer[0,2]/np.sin(ThetaVB2), vContainer[1,2]/np.sin(ThetaVB2))
+
+            V1s[i,:] = (vContainer[0,:])
+            V2s[i,:] = (vContainer[1,:])
+            V3s[i,:] = (vContainer[2,:])
+
+            c1 = w[2] - w[1]
+            c2 = 2*(w[1] - w[0])
+            c3 = 3*w[0] + 1
+
+            Cs[i,:] = np.array([c1,c2,c3])
+        
+        if self.correctInitTau == True:
+            X = self._C2X(Cs)
+
+            RSs = self._phys2Natural(X)
+            XNew = self._natural2Phys(RSs,True)
+            Cs = self._X2C(XNew)
+
+        return ks,V1s,V2s,V3s,Cs,NPs
+
+
+    def _C2Tau(self,Cs,*deltaThetaV):
+        """
+        Mapping physical parameters (k, C1, C2, C3, v1, v2, v3) to
+        Reynolds stress. Note that only C can be modified.
+        """
+        taus = np.zeros((self.nMesh,6))
+        ThetaVAOld, ThetaVBOld, ThetaVCOld = self.getThetaVABC(self.tau)
+
+        for i in range(self.nMesh):
+            lam1 = Cs[i,0] + Cs[i,1]/2.0 + Cs[i,2]/3.0 - 1.0/3.0
+            lam2 = Cs[i,1]/2.0 + Cs[i,2]/3.0 - 1.0/3.0
+            lam3 = Cs[i,2]/3.0 - 1.0/3.0
+            Lambda = np.diag([lam3,lam2,lam1])
+            V = np.zeros((3,3))
+
+            if np.shape(deltaThetaV)[0] > 0:
+                thetaVA = (deltaThetaV[0][i,0] + ThetaVAOld[i])[0]
+                thetaVB = (deltaThetaV[0][i,1] + ThetaVBOld[i])[0]
+                thetaVC = (deltaThetaV[0][i,2] + ThetaVCOld[i])[0]
+
+                thetaVA = self._adjustThetaAngle(thetaVA)
+                thetaVB = self._adjustThetaAngle(thetaVB)
+                thetaVC = self._adjustThetaAngle(thetaVC)
+
+                RA = np.array([[np.cos(thetaVA),np.sin(thetaVA),0],\
+                               [-np.sin(thetaVA),np.cos(thetaVA),0],\
+                               [0,0,1]])
+                RB = np.array([[1,0,0],\
+                               [0,np.cos(thetaVB),np.sin(thetaVB)],\
+                               [0,-np.sin(thetaVB),np.cos(thetaVB)]])
+                RC = np.array([[np.cos(thetaVC),np.sin(thetaVC),0],\
+                               [-np.sin(thetaVC),np.cos(thetaVC),0],\
+                               [0,0,1]])
+                RMatrix = np.dot(np.dot(RC,RB),RA)
+
+                V[0,:] = RMatrix[0,:]
+                V[1,:] = RMatrix[1,:]
+                V[2,:] = RMatrix[2,:]
+
+            else:
+                V[0,:] = self.V1[i,:]
+                V[1,:] = self.V2[i,:]
+                V[2,:] = self.V3[i,:]
+                
+
+            t = 2*self.k[i][0]\
+                *(np.eye(3)/3.0 + np.dot(np.dot(np.transpose(V),Lambda),V))
+            taus[i,:] = np.array([t[0,0],t[0,1],t[0,2],t[1,1],t[1,2],t[2,2]])
+        return taus
+
+
+    def _C2X(self,Cs):
+        """
+        Conversion between Baycentric coordinates and their global
+        physical coordinates used to plot Baycentric triangle
+        """
+        Xs = np.zeros((self.nMesh,2))
+
+        for i in range(self.nMesh):
+            Xs[i,:] = Cs[i,0]*self.xcs[0,:] + Cs[i,1]*self.xcs[1,:]\
+                      + Cs[i,2]*self.xcs[2,:]
+
+        return Xs
+
+
+    def _X2C(self,Xs):
+
+        Cs = np.zeros((self.nMesh,3))
+        Cmatrix = np.zeros((3,3))
+        Cmatrix[:,0] = self.xcs[:,0]
+        Cmatrix[:,1] = self.xcs[:,1]
+        Cmatrix[:,2] = np.array([[1,1,1]])
+        Cmatrix = np.transpose(Cmatrix)
+
+        for i in range(self.nMesh):
+            Cs[i,:] = np.dot(np.linalg.inv(Cmatrix),
+                             np.array([Xs[i,0],Xs[i,1],1]))
+
+        return Cs
+
+    def _phys2Natural(self, XYs):
+
+        """
+        Mapping from physical coordinate to natural (normalized)
+        coordinates \\xi and \eta
+
+        # TODO: make sure the point is in the triangle
+        # make sure the triangle is [[0,0],[1,0],[0,3**0.5/2.0],[0,3**0.5/2.0]]
+
+        # According to Chongyu Hua's derivation in "An inverse transformation
+        # for quadrilateral isoparametric elements: Analysis and application"
+        # in "Finite Elements in Analysis and Design", 1990
+        """
+
+        a1,a2 = -1,0
+        b1,b2 = 1,0
+        c1,c2 = 0,3**0.5
+
+        x1,y1 = self.triangle[0,0],self.triangle[0,1]
+        x2,y2 = self.triangle[1,0],self.triangle[1,1]
+        x3,y3 = self.triangle[2,0],self.triangle[2,1]
+        x4,y4 = self.triangle[3,0],self.triangle[3,1]
+
+        RSs = np.zeros((self.nMesh,2))
+        for i in range(self.nMesh):
+            px,py = XYs[i,0],XYs[i,1]
+
+            d1 = 4*px - x1 - x2 - x3 - x4
+            d2 = 4*py - y1 - y2 - y3 - y4
+
+            RSs_r = (d1*c2 - c1*d2)/(a1*d2 + b1*c2 + 0.0)
+            RSs_s = d2/(c2 + 0.0)
+
+            RSs[i,:] = np.array([RSs_r,RSs_s])
+
+        return RSs
+
+    def _natural2Phys(self, RSs, capFlag = 'False'):
+
+        """
+        Mapping from natural coordinates to physcial coordinates
+
+        # TODO: make sure the point is in the triangle
+        """
+
+        x1,y1 = self.triangle[0,0],self.triangle[0,1]
+        x2,y2 = self.triangle[1,0],self.triangle[1,1]
+        x3,y3 = self.triangle[2,0],self.triangle[2,1]
+        x4,y4 = self.triangle[3,0],self.triangle[3,1]
+
+        XYs = np.zeros((self.nMesh,2))
+
+        for i in range(self.nMesh):
+            pr0,ps0 = RSs[i,0],RSs[i,1]
+            perturbr,perturbs = self.deltaXi[i],self.deltaEta[i]
+            pr2Max, ps2Max = 1 - pr0, 1 - ps0
+            pr2Min, ps2Min = 1 + pr0, 1 + ps0
+
+            tiny = np.finfo(np.float).tiny
+
+            # Adding relative perturbation
+            # pr = pr0 + (np.abs(perturbr)/(tiny + perturbr) + 1)\
+            #            /2.0*perturbr*pr2Max\
+            #          - (np.abs(perturbr)/(tiny + perturbr) - 1)\
+            #            /2.0*perturbr*pr2Min
+            # ps = ps0 + (np.abs(perturbs)/(tiny + perturbs) + 1)\
+            #            /2.0*perturbs*ps2Max\
+            #          - (np.abs(perturbs)/(tiny+perturbs) - 1)\
+            #            /2.0*perturbs*ps2Min
+
+            # Adding absolute perturbation
+            pr = pr0 + perturbr
+            ps = ps0 + perturbs
+
+            # ADD by JX TODO temporarily shut down capping
+            # Capping the value of r&s when the absolute value is large than 1
+            if capFlag == "False":
+                pr = pr
+                ps = ps
+            else:
+                if np.abs(pr) > 1:
+                    pr = np.abs(pr)/(tiny + pr)
+
+                if np.abs(ps) > 1:
+                    ps = np.abs(ps)/(tiny + ps)
+
+            Nxy1 = 1.0/4.0*(1 - pr)*(1 - ps)
+            Nxy2 = 1.0/4.0*(1 + pr)*(1 - ps)
+            Nxy3 = 1.0/4.0*(1 + pr)*(1 + ps)
+            Nxy4 = 1.0/4.0*(1 - pr)*(1 + ps)
+
+            XYs_x = Nxy1*x1 + Nxy2*x2 + Nxy3*x3 + Nxy4*x4
+            XYs_y = Nxy1*y1 + Nxy2*y2 + Nxy3*y3 + Nxy4*y4
+
+            # TODO:check[0]
+            XYs[i,:] = np.array([XYs_x[0],XYs_y[0]])
+        return XYs
+
+    def _adjustThetaAngle(self, angle):
+
+        """
+        Adjust the theta angle to [0, pi)
+
+        """
+        
+        angleAdjusted = angle
+        if angle >= np.pi: 
+            angleAdjusted = angle - np.pi
+        elif angle < 0:
+            angleAdjusted = angle + np.pi
+
+        return angleAdjusted
+
+    def _adjustThetaAngle2(self, angle):
+
+        """
+        Adjust the theta angle to [-pi/2, pi/2)
+
+        """
+        
+        angleAdjusted = angle
+        if angle >= np.pi/2.0: 
+            angleAdjusted = angle - np.pi
+        elif angle < -np.pi/2.0:
+            angleAdjusted = angle + np.pi
+
+        return angleAdjusted
+
+
+
+"""
+Methods:
+
+    writeTauToOpenFoam():
+
+    * Write one perturbed instance of Reynolds stress to OpenFOAM file
+
+    readTauFromOpenFoam():
+
+    *   Read from Reynolds stress from OpenFOAM file
+
+
+    == Mapping functions ==
+    (Functions starting with underscore are "private")
+
+    _perturbXiEta():
+
+    *   Perturb on the natural coordinate system (\\xi and \eta)
+    according to deltaXi and deltaEta, and write to OpenFOAM instances
+
+
+    == Diagnosis functions ==
+
+    plotTauOnBaycentric():
+
+    *   Plot a Reynolds stress (the i^th error realization) on Baycentric
+    coordinate
+
+    plotTauOnSquare():
+
+    *   Plot a Reynolds stress (the i^th error realization) on natural (\\xi,
+    \eta) coordinate
+"""

@@ -1,0 +1,33 @@
+#!/bin/bash
+# Time-stamp: <2015-07-07 Jianxun Wang>
+# usage: cpcasefoam src dest
+
+
+src=$1
+dest=$2
+
+if [ ! -d $src ]; then
+    echo Source dir: $src : does not exist.
+    exit 1
+fi
+
+if [ -d $dest ]; then
+    echo Desination dir: $dest : already exist. Please use new name or delet it
+    echo Exiting now ... 
+    exit 1
+    
+else
+    mkdir $dest
+    cp -r $src/*_base   $dest
+    cp -r $src/*.in     $dest
+    cp -r $src/*.sh     $dest
+    cp -r $src/*.py     $dest
+    cp -r $src/diagnosis $dest
+    cp -r $src/debugPlottingProcessing $dest
+    cp -r $src/sets        $dest
+    cp -r $src/sampleDict* $dest
+    cp -r $src/obsVPlot $dest
+
+    mkdir $dest/figures
+    mkdir $dest/debugData
+fi    

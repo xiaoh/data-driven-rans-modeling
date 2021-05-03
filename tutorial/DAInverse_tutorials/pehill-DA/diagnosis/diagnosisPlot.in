@@ -1,0 +1,15 @@
+debugDir             ../debugData/
+finalDAStep          10.0
+Npara                30
+Ns                   60
+Nmodelist            2, 2, 2
+obsSigmaFixed        5e-3, 5e-3, 5e-3      
+obsRelCoeff          1e-2, 1e-2, 1e-2
+obsRmaCoeff          1e-2
+N_modesXi            2
+N_modesEta           2
+N_modesk             2
+n_omegaXi            2
+n_omegaEta           2
+n_omegak             2    
+list_uloc            1, 9

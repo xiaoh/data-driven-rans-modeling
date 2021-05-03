@@ -1,0 +1,23 @@
+# baseline case name
+caseName        cavity_base
+# case solver
+caseSolver      steadyTauFoam
+# write interval for OpenFOAM case
+writeInterval   10
+# number of samples
+nSample         10
+nSample_propagate         10
+# number of cell for cfd, kl, pce mesh
+nCell_cfd       16
+nCell_kl        16
+nCell_pce       16
+# number of KL modes
+nKL             4
+# order of PCE
+pOrder          3
+# parallel flag
+enablePP        False
+cpuToUse        10
+
+propagateFlag   True
+lenXYZ          0.1, 0.1, 0.1

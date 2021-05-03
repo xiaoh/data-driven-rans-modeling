@@ -1,0 +1,2 @@
+myLRR/myLRR.C
+LIB = $(FOAM_USER_LIBBIN)/libmyIncompresssibleRASModels
